@@ -1,0 +1,41 @@
+default_language_version:
+  python: python3.11
+
+customCommands:
+  - key: "W"
+    command: git commit --no-verify
+    context: "global"
+    subprocess: true
+
+repos:
+  -   repo: https://github.com/pre-commit/pre-commit-hooks
+      rev: v2.3.0
+      hooks:
+        -   id: check-yaml
+        -   id: end-of-file-fixer
+        -   id: trailing-whitespace
+        -   id: check-added-large-files
+  -   repo: https://github.com/psf/black
+      rev: 23.9.1
+      hooks:
+        -   id: black
+            language_version: python3.10
+  -   repo: https://github.com/pycqa/flake8
+      rev: 6.1.0
+      hooks:
+        - id: flake8
+  -   repo: https://github.com/pycqa/isort
+      rev: 5.12.0
+      hooks:
+        -   id: isort
+            args: ["--profile=black"]
+  -   repo: local
+      hooks:
+        -   id: pytest-check
+            name: pytest-check
+            stages: [push]
+            types: [python3]
+            entry: bash -c 'make dev_test'
+            language: python
+            pass_filenames: false
+            always_run: true

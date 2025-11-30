@@ -1,0 +1,13 @@
+name: Unit Test
+on: push
+jobs:
+  test:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: chmod +x ./scripts/develop.sh
+      - run: make dev_install
+      - run: make dev_test
