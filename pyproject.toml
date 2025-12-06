@@ -19,3 +19,10 @@ exclude = '''
 [tool.isort]
 profile = "black"
 lines_after_imports = 2
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]

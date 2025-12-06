@@ -213,6 +213,8 @@ celerybeat.pid
 
 # Environments
 .env
+# Exception: track example environment files
+!.env*.example
 .venv
 env/
 venv/

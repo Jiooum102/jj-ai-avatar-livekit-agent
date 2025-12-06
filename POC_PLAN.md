@@ -45,6 +45,11 @@ RabbitMQ Queue → Consumer → Talking Face Generator
   - Add `pydantic` for message validation
   - Add `python-dotenv` for configuration
   - Add `asyncio` compatible libraries
+  - **For Text-to-Speech (TTS)**:
+    - `edge-tts` (recommended: Windows Edge TTS, free, high quality)
+    - `pyttsx3` (alternative: cross-platform, lower quality)
+    - `pydub` (for audio format conversion)
+    - For API-based TTS: `openai` (for OpenAI TTS), `elevenlabs` (for ElevenLabs API)
   - **For Local AI Inference** (choose based on selected model):
     - `torch` and `torchvision` (PyTorch for model inference)
     - `torchaudio` (for audio processing)
@@ -60,6 +65,11 @@ RabbitMQ Queue → Consumer → Talking Face Generator
 - **Tasks**:
   - RabbitMQ connection settings (host, port, queue name, credentials)
   - RTMP output URL configuration
+  - **TTS settings**:
+    - TTS provider type (local or API)
+    - Local TTS settings (edge-tts voice selection, language)
+    - API TTS settings (API key, endpoint, voice ID)
+    - Audio output format (sample rate, channels, format)
   - Talking face API settings (if using external service)
   - **Local AI model settings** (Primary: MuseTalk):
     - Model type: MuseTalk (primary for PoC)
@@ -92,7 +102,7 @@ RabbitMQ Queue → Consumer → Talking Face Generator
   - Connect to RabbitMQ server with retry logic
   - Subscribe to specified queue
   - Handle message acknowledgment (ack on success, nack on failure)
-  - Parse incoming messages (expect JSON with text/audio data)
+  - Parse incoming messages (expect JSON with text data)
   - Handle connection errors and reconnection logic
   - Support graceful shutdown
 
@@ -102,10 +112,10 @@ RabbitMQ Queue → Consumer → Talking Face Generator
 - **Design**: Pydantic models for type safety and validation
 - **Tasks**:
   - Define Pydantic models for message structure:
-    - `TextMessage`: Contains text to convert to talking face
-    - `AudioMessage`: Contains audio data (if sending audio directly)
+    - `TextMessage`: Contains text to convert to talking face (via TTS)
     - `ControlMessage`: For control commands (start/stop stream)
   - Message validation and parsing
+  - **Note**: Only TextMessage is supported. Workflow is: Text → TTS → Audio → Talking Face
 
 ### Phase 3: Static Video Generation (Idle State)
 
@@ -121,6 +131,69 @@ RabbitMQ Queue → Consumer → Talking Face Generator
   - Support configurable default image/video path
   - Generate frames on-demand for continuous streaming
 
+### Phase 3.5: Text-to-Speech (TTS) Module
+
+#### 3.5.1 TTS Base Interface
+- **File**: `src/poc/tts/base.py`
+- **Design**: Abstract base class defining TTS interface
+- **Tasks**:
+  - Define abstract base class for TTS providers
+  - Methods:
+    - `synthesize(text: str, language: str, voice_id: Optional[str]) -> bytes`
+    - `synthesize_streaming(text: str, language: str, voice_id: Optional[str]) -> AsyncIterator[bytes]`
+  - Support multiple TTS backends (local and API-based)
+  - Return audio in consistent format (WAV, 44.1kHz, mono)
+  - Handle language and voice selection
+  - Support streaming audio generation for low latency
+
+#### 3.5.2 Local TTS Implementation
+- **File**: `src/poc/tts/local_tts.py`
+- **Design**: Local TTS using edge-tts (Windows Edge TTS) or pyttsx3
+- **Tasks**:
+  - Implement local TTS using edge-tts (recommended for PoC):
+    - Free, no API key required
+    - High quality voices
+    - Multiple languages supported
+    - Low latency
+  - Alternative: pyttsx3 (cross-platform, but lower quality)
+  - Audio format conversion:
+    - Convert to WAV format
+    - Normalize sample rate (44.1kHz)
+    - Convert to mono channel
+    - Handle audio encoding/decoding
+  - Voice selection and management:
+    - List available voices
+    - Select voice by ID or language
+    - Cache voice metadata
+  - Error handling:
+    - Handle TTS generation failures
+    - Fallback to default voice
+    - Retry logic for transient errors
+
+#### 3.5.3 API-Based TTS Implementation
+- **File**: `src/poc/tts/api_tts.py`
+- **Design**: API-based TTS using external services
+- **Tasks**:
+  - Support multiple TTS API providers:
+    - **ElevenLabs**: High quality, natural voices
+    - **Cartesia**: Real-time streaming TTS
+    - **Google Cloud TTS**: Enterprise-grade
+    - **Azure TTS**: Microsoft voices
+  - Handle API authentication
+  - Make async API calls
+  - Support streaming audio if API supports it
+  - Handle API rate limits and errors
+  - Audio format conversion to standard format
+  - Retry logic with exponential backoff
+
+#### 3.5.4 TTS Factory
+- **File**: `src/poc/tts/factory.py`
+- **Tasks**:
+  - Factory pattern to select TTS provider (local vs API)
+  - Initialize provider based on configuration
+  - Handle provider switching at runtime
+  - Provider health checking
+
 ### Phase 4: Talking Face Generation
 
 **Note**: Model selection and comparison details are documented in the [Model Selection](#model-selection) section at the end of this document. This phase focuses on implementation details and code patterns.
@@ -135,12 +208,11 @@ RabbitMQ Queue → Consumer → Talking Face Generator
   - Define abstract base class for talking face generators
   - Methods:
     - `generate_from_audio(audio: bytes, avatar: Union[str, Path]) -> AsyncIterator[np.ndarray]`
-    - `generate_from_text(text: str, avatar: Union[str, Path]) -> AsyncIterator[np.ndarray]`
     - `generate_video_to_video(source_video: Union[str, Path], audio: bytes) -> AsyncIterator[np.ndarray]`
   - Support multiple input types:
-    - Text-to-talking-face (requires TTS integration)
-    - Audio-to-talking-face
+    - Audio-to-talking-face (primary method)
     - **Video-to-video** (video input + audio) - MuseTalk supports this
+  - **Note**: Text-to-talking-face is handled by pipeline: Text → TTS → Audio → Talking Face
   - Return video with consistent frame rate and resolution
   - Handle both image and video inputs
 
@@ -289,17 +361,20 @@ RabbitMQ Queue → Consumer → Talking Face Generator
 - **Tasks**:
   - Orchestrate the complete pipeline:
     1. **On Start**: Begin streaming static video immediately
-    2. **On RabbitMQ Message**: 
+    2. **On RabbitMQ Message** (TextMessage):
        - Switch state to PROCESSING
-       - Generate talking face video
+       - Convert text to audio using TTS module
+       - Generate talking face video from audio
        - Switch state to TALKING
        - Stream talking face video
     3. **After Talking Face Completes**:
        - Switch state back to IDLE
        - Return to streaming static video
+    4. **Workflow**: Text → TTS → Audio → Talking Face Video
   - Handle async operations
   - Manage seamless transitions between static and talking video
   - Ensure no gaps in RTMP stream
+  - Coordinate TTS and talking face generation
   - Error handling and recovery
   - Logging and monitoring
 
@@ -422,6 +497,12 @@ src/
 │   ├── static_video.py         # Static/default video generator
 │   ├── video_buffer.py         # Video frame buffer
 │   ├── models.py               # Message models
+│   ├── tts/                     # Text-to-Speech module
+│   │   ├── __init__.py
+│   │   ├── base.py             # TTS base interface
+│   │   ├── local_tts.py        # Local TTS implementation (edge-tts)
+│   │   ├── api_tts.py          # API-based TTS implementation
+│   │   └── factory.py          # TTS factory pattern
 │   └── talking_face/
 │       ├── __init__.py
 │       ├── base.py             # Base interface
@@ -479,6 +560,16 @@ RTMP_BITRATE=2000k
 
 STATIC_VIDEO_PATH=./assets/default_avatar.png  # or video file
 STATIC_VIDEO_LOOP=true  # Loop static video if it's a video file
+
+TTS_PROVIDER=local  # 'api' or 'local'
+TTS_PROVIDER_LOCAL=edge-tts  # 'edge-tts' or 'pyttsx3'
+TTS_VOICE=en-US-AriaNeural  # Voice ID for edge-tts (optional, auto-selects by language)
+TTS_LANGUAGE=en  # Default language code
+TTS_SAMPLE_RATE=44100  # Audio sample rate (Hz)
+TTS_CHANNELS=1  # Audio channels (1=mono, 2=stereo)
+# TTS_API_PROVIDER=elevenlabs  # 'elevenlabs', 'openai', 'cartesia'
+# TTS_API_KEY=your-api-key
+# TTS_API_VOICE_ID=voice-id
 
 TALKING_FACE_PROVIDER=local  # 'api' or 'local'
 TALKING_FACE_MODEL=musetalk  # Primary: musetalk (backup: mimictalk, synctalk)
@@ -550,8 +641,8 @@ FFMPEG_PATH=ffmpeg  # or full path if not in PATH
 - **Phase 8**: 1-2 days (Testing & Demo)
 
 **Total**: 
-- **With API-based**: 10-14 days
-- **With Local AI**: 12-18 days (includes model setup and optimization)
+- **With API-based**: 11-16 days (includes TTS module)
+- **With Local AI**: 13-20 days (includes TTS module and model setup/optimization)
 
 ## Next Steps
 
@@ -568,15 +659,17 @@ FFMPEG_PATH=ffmpeg  # or full path if not in PATH
 2. Initialize static video generator
 3. **Start RTMP stream immediately** with static video
 4. Initialize RabbitMQ consumer (background)
-5. Initialize talking face provider
-6. Ready to process messages
+5. Initialize TTS module
+6. Initialize talking face provider
+7. Ready to process messages
 
 ### Message Processing Flow:
 1. **IDLE State**: Continuously streaming static video
-2. **Message Received**: RabbitMQ consumer receives message
+2. **Message Received**: RabbitMQ consumer receives TextMessage
 3. **PROCESSING State**: 
    - Continue streaming static video
-   - Start generating talking face in background
+   - Convert text to audio using TTS module
+   - Generate talking face from audio in background
 4. **TALKING State**: 
    - Talking face generation complete
    - Seamlessly switch video source from static to talking face
@@ -585,6 +678,8 @@ FFMPEG_PATH=ffmpeg  # or full path if not in PATH
    - Seamlessly switch back to static video
    - Return to IDLE state
    - Ready for next message
+
+**Workflow**: Text → TTS → Audio → Talking Face Video
 
 ### Key Implementation Details:
 - **No Stream Interruption**: RTMP stream must never stop, even during transitions
