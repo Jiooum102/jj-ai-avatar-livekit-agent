@@ -4,7 +4,7 @@ This module defines Pydantic models for type-safe message validation
 and parsing from RabbitMQ queues.
 """
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
@@ -15,7 +15,7 @@ class BaseMessage(BaseModel):
 
     session_id: str = Field(..., description="Unique session identifier")
     timestamp: Optional[datetime] = Field(
-        default_factory=lambda: datetime.now(UTC), description="Message timestamp (UTC)"
+        default_factory=lambda: datetime.now(timezone.utc), description="Message timestamp (UTC)"
     )
 
 

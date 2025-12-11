@@ -320,19 +320,24 @@ RabbitMQ Queue → Consumer → Talking Face Generator
 #### 5.1 FFmpeg Streamer
 
 - **File**: `src/poc/rtmp_streamer.py`
-- **Design**: Async subprocess management with stdin pipe for frame input
+- **Design**: FIFO-based streaming with separate video and audio inputs, using queues and writer threads
 - **Tasks**:
-  - Implement FFmpeg subprocess management
+  - Implement FFmpeg subprocess management with FIFOs (named pipes)
   - Create FFmpeg pipeline for RTMP streaming:
-    - Input: Video frames from pipe (continuous)
+    - Input: Video frames from video FIFO (rawvideo, RGB24 format)
+    - Input: Audio chunks from audio FIFO (s16le, mono PCM format)
     - Encoding: H.264 video, AAC audio
     - Output: RTMP stream (continuous, never stops)
+  - Use separate queues for video and audio frames
+  - Use separate writer threads for video and audio to FIFOs
+  - Implement `push(frame, audio)` method that accepts both video frame and audio chunk together
   - Handle FFmpeg process lifecycle
   - Start streaming immediately on application start
   - Monitor stream health
   - Handle reconnection if stream drops (auto-reconnect)
   - Support different video formats and resolutions
   - Accept frames from different sources (static or talking face)
+  - Frame rate synchronization to maintain consistent FPS
 
 #### 5.2 Video Frame Buffer
 
@@ -459,28 +464,42 @@ Or for audio:
 
 ### FFmpeg Command Template
 
+The RTMP streamer uses FIFOs (named pipes) for separate video and audio inputs:
+
 ```bash
-ffmpeg -re \
+ffmpeg \
+  -loglevel error \
+  -fflags nobuffer \
+  -thread_queue_size 1024 \
   -f rawvideo \
-  -vcodec rawvideo \
-  -s 1280x720 \
   -pix_fmt rgb24 \
+  -s 1280x720 \
   -r 30 \
-  -i pipe:0 \
+  -i /tmp/rtmp_video_fifo_<pid>_<tid> \
+  -thread_queue_size 1024 \
+  -f s16le \
+  -ac 1 \
+  -ar 16000 \
+  -i /tmp/rtmp_audio_fifo_<pid>_<tid> \
   -c:v libx264 \
   -preset ultrafast \
   -tune zerolatency \
-  -b:v 2000k \
-  -maxrate 2000k \
-  -bufsize 4000k \
   -pix_fmt yuv420p \
-  -g 50 \
+  -g 30 \
+  -b:v 2000k \
   -c:a aac \
   -b:a 128k \
-  -ar 44100 \
   -f flv \
   rtmp://your-server.com/live/stream_key
 ```
+
+**Key Features:**
+- Separate FIFOs for video and audio inputs
+- Video: rawvideo format (RGB24) from video FIFO
+- Audio: s16le format (mono PCM) from audio FIFO
+- Separate writer threads for video and audio queues
+- Frame rate synchronization to maintain consistent FPS
+- `push(frame, audio)` method accepts both video frame and audio chunk together
 
 ### Directory Structure
 

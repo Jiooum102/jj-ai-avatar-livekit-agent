@@ -1,7 +1,7 @@
 """Unit tests for message models."""
 
 import json
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 import pytest
@@ -59,13 +59,13 @@ class TestTextMessage:
 
     def test_text_message_timestamp(self) -> None:
         """Test automatic timestamp generation."""
-        before = datetime.now(UTC)
+        before = datetime.now(timezone.utc)
         message = TextMessage(
             type="text",
             data="Test",
             session_id="test-session",
         )
-        after = datetime.now(UTC)
+        after = datetime.now(timezone.utc)
 
         assert before <= message.timestamp <= after
 

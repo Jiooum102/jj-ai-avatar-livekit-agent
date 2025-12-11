@@ -54,9 +54,24 @@ make dev_install
 
 Or manually:
 ```bash
+# Install chumpy first (workaround for mmpose dependency build issue)
+pip install --no-build-isolation chumpy
+
+# Install other Python dependencies
 pip install -r requirements.txt
+
+# Install MMLab packages via mim (recommended)
+pip install openmim
+mim install mmengine
+mim install "mmcv==2.0.1"
+mim install "mmdet==3.1.0"
+mim install "mmpose==1.1.0"
+
+# Install pre-commit hooks
 pre-commit install
 ```
+
+**Note**: The `chumpy` package (a dependency of `mmpose`) has a build issue that requires installing it with `--no-build-isolation`. The installation script handles this automatically, but if installing manually, install `chumpy` first before other dependencies.
 
 3. Set up environment variables:
 ```bash

@@ -212,7 +212,7 @@ celerybeat.pid
 *.sage.py
 
 # Environments
-.env
+.env.dev
 # Exception: track example environment files
 !.env*.example
 .venv
@@ -264,3 +264,6 @@ poetry.toml
 pyrightconfig.json
 
 # End of https://www.toptal.com/developers/gitignore/api/python,pycharm+all,venv
+
+# Model files
+models/

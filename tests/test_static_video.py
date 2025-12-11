@@ -171,9 +171,9 @@ class TestStaticVideoGenerator:
         self, test_image_path: Path, mock_settings: None
     ) -> None:
         """Test integration with configuration settings."""
-        # Test with default settings (from config)
-        # This will use settings from get_settings()
-        async with StaticVideoGenerator() as generator:
+        # Test with default settings (from config) but use test image
+        # This will use settings from get_settings() for resolution/fps
+        async with StaticVideoGenerator(source_path=test_image_path) as generator:
             # Should use settings from config
             assert generator.target_width is not None
             assert generator.target_height is not None

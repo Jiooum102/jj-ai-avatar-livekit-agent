@@ -5,10 +5,15 @@ with support for environment variables and default values.
 """
 
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal, Optional, TypeVar, Type
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Module-level variable to store current env_file for nested settings
+_current_env_file: Optional[str] = None
+
+T = TypeVar("T", bound=BaseSettings)
 
 
 class RabbitMQSettings(BaseSettings):
@@ -158,6 +163,25 @@ class MuseTalkSettings(BaseSettings):
     device: Literal["cuda", "cpu"] = Field(default="cuda", description="Device for inference (cuda or cpu)")
     batch_size: int = Field(default=1, ge=1, description="Inference batch size")
     fps: Optional[int] = Field(default=None, description="Output FPS (uses RTMP FPS if None)")
+    use_float16: bool = Field(
+        default=False, description="Use float16 for faster inference (requires more VRAM)"
+    )
+    whisper_dir: Optional[str] = Field(
+        default=None, description="Path to Whisper model directory (default: openai/whisper-tiny)"
+    )
+    vae_type: str = Field(
+        default="sd-vae", 
+        description="VAE type (default: sd-vae). Can be a local path like 'sd-vae' or HuggingFace model ID like 'stabilityai/sd-vae-ft-mse')"
+    )
+    version: Literal["v1", "v15"] = Field(
+        default="v15", description="MuseTalk model version (v1 or v15)"
+    )
+    bbox_shift: int = Field(
+        default=0, description="Bounding box shift value for face detection adjustment"
+    )
+    extra_margin: int = Field(
+        default=10, description="Extra margin for face cropping (v15 only)"
+    )
 
     @field_validator("checkpoint_path", "avatar_image", "avatar_video", mode="before")
     @classmethod
@@ -234,14 +258,72 @@ class Settings(BaseSettings):
 
     This class aggregates all configuration settings and provides
     a single entry point for application configuration.
+    
+    The env_file can be specified via:
+    1. ENV_FILE environment variable
+    2. env_file parameter in get_settings() or reload_settings()
+    3. Default: ".env"
     """
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=".env",  # Default, can be overridden via ENV_FILE env var or get_settings(env_file=...)
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
     )
+    
+    @classmethod
+    def create(cls, env_file: Optional[str] = None) -> "Settings":
+        """Create a Settings instance with a specific env file.
+        
+        Args:
+            env_file: Optional path to environment file. If None, uses:
+                1. ENV_FILE environment variable
+                2. Default ".env"
+        
+        Returns:
+            Settings instance configured with the specified env file.
+        """
+        import os
+        global _current_env_file
+        
+        # Determine env_file to use
+        if env_file is None:
+            env_file = os.getenv("ENV_FILE", ".env")
+        
+        # Store env_file in module-level variable for nested settings
+        _current_env_file = env_file
+        
+        # Create a new class with updated model_config
+        class SettingsWithEnvFile(cls):
+            model_config = SettingsConfigDict(
+                env_file=env_file,
+                env_file_encoding="utf-8",
+                case_sensitive=False,
+                extra="ignore",
+            )
+            
+            # Override nested settings fields to use env_file-aware factories
+            rabbitmq: RabbitMQSettings = Field(
+                default_factory=lambda: _create_nested_settings(RabbitMQSettings, env_file)
+            )
+            rtmp: RTMPSettings = Field(
+                default_factory=lambda: _create_nested_settings(RTMPSettings, env_file)
+            )
+            static_video: StaticVideoSettings = Field(
+                default_factory=lambda: _create_nested_settings(StaticVideoSettings, env_file)
+            )
+            tts: TTSSettings = Field(
+                default_factory=lambda: _create_nested_settings(TTSSettings, env_file)
+            )
+            talking_face: TalkingFaceSettings = Field(
+                default_factory=lambda: _create_nested_settings(TalkingFaceSettings, env_file)
+            )
+            ffmpeg: FFmpegSettings = Field(
+                default_factory=lambda: _create_nested_settings(FFmpegSettings, env_file)
+            )
+        
+        return SettingsWithEnvFile()
 
     # Application settings
     app_name: str = Field(default="jj-ai-avatar-livekit-agent-poc", description="Application name")
@@ -263,8 +345,113 @@ class Settings(BaseSettings):
 _settings: Optional[Settings] = None
 
 
-def get_settings() -> Settings:
+def _create_nested_settings(cls: Type[T], env_file: Optional[str] = None) -> T:
+    """Helper function to create nested settings classes with env_file context.
+    
+    This function creates a new class with the same structure as the input class
+    but with an updated model_config that includes the env_file. For classes with
+    nested BaseSettings fields (like TalkingFaceSettings), it also updates those
+    nested fields to use the same env_file.
+    
+    Args:
+        cls: The settings class to create an instance of.
+        env_file: Optional env_file to use. If None, uses _current_env_file.
+    
+    Returns:
+        Instance of the settings class configured with the env_file.
+    """
+    import os
+    # Use provided env_file, or current module-level env_file, or default
+    if env_file is None:
+        env_file = _current_env_file or os.getenv("ENV_FILE", ".env")
+    
+    # Get the original model_config
+    original_config = cls.model_config
+    
+    # Special handling for TalkingFaceSettings - needs nested settings updated
+    if cls.__name__ == "TalkingFaceSettings":
+        # Get original field info to preserve metadata
+        api_field = cls.model_fields.get("api")
+        musetalk_field = cls.model_fields.get("musetalk")
+        mimictalk_field = cls.model_fields.get("mimictalk")
+        synctalk_field = cls.model_fields.get("synctalk")
+        
+        class NestedSettingsWithEnvFile(cls):
+            model_config = SettingsConfigDict(
+                env_file=env_file,
+                env_file_encoding=original_config.get("env_file_encoding", "utf-8"),
+                case_sensitive=original_config.get("case_sensitive", False),
+                env_prefix=original_config.get("env_prefix", ""),
+                extra=original_config.get("extra", "ignore"),
+            )
+            # Override nested settings fields to use env_file-aware factories
+            api: TalkingFaceAPISettings = Field(
+                default_factory=lambda: _create_nested_settings(TalkingFaceAPISettings, env_file),
+                description=api_field.description if api_field else None,
+            )
+            musetalk: MuseTalkSettings = Field(
+                default_factory=lambda: _create_nested_settings(MuseTalkSettings, env_file),
+                description=musetalk_field.description if musetalk_field else None,
+            )
+            mimictalk: MimicTalkSettings = Field(
+                default_factory=lambda: _create_nested_settings(MimicTalkSettings, env_file),
+                description=mimictalk_field.description if mimictalk_field else None,
+            )
+            synctalk: SyncTalkSettings = Field(
+                default_factory=lambda: _create_nested_settings(SyncTalkSettings, env_file),
+                description=synctalk_field.description if synctalk_field else None,
+            )
+        
+        return NestedSettingsWithEnvFile()
+    
+    # Special handling for TTSSettings - needs nested settings updated
+    if cls.__name__ == "TTSSettings":
+        # Get original field info to preserve metadata
+        local_field = cls.model_fields.get("local")
+        api_field = cls.model_fields.get("api")
+        
+        class NestedSettingsWithEnvFile(cls):
+            model_config = SettingsConfigDict(
+                env_file=env_file,
+                env_file_encoding=original_config.get("env_file_encoding", "utf-8"),
+                case_sensitive=original_config.get("case_sensitive", False),
+                env_prefix=original_config.get("env_prefix", ""),
+                extra=original_config.get("extra", "ignore"),
+            )
+            # Override nested settings fields to use env_file-aware factories
+            local: LocalTTSSettings = Field(
+                default_factory=lambda: _create_nested_settings(LocalTTSSettings, env_file),
+                description=local_field.description if local_field else None,
+            )
+            # api is Optional, so preserve that - don't create it by default
+            api: Optional[APITTSSettings] = Field(
+                default=None,
+                description=api_field.description if api_field else None,
+            )
+        
+        return NestedSettingsWithEnvFile()
+    
+    # For other settings classes, just update model_config
+    class NestedSettingsWithEnvFile(cls):
+        model_config = SettingsConfigDict(
+            env_file=env_file,
+            env_file_encoding=original_config.get("env_file_encoding", "utf-8"),
+            case_sensitive=original_config.get("case_sensitive", False),
+            env_prefix=original_config.get("env_prefix", ""),
+            extra=original_config.get("extra", "ignore"),
+        )
+    
+    return NestedSettingsWithEnvFile()
+
+
+def get_settings(env_file: Optional[str] = None) -> Settings:
     """Get or create the global settings instance.
+
+    Args:
+        env_file: Optional path to environment file. If None, uses:
+            1. ENV_FILE environment variable
+            2. Default ".env"
+            If provided, forces reload with the new env_file.
 
     Returns:
         Settings: The global settings instance.
@@ -273,22 +460,49 @@ def get_settings() -> Settings:
         >>> settings = get_settings()
         >>> print(settings.rabbitmq.host)
         localhost
+        
+        >>> # Use custom env file
+        >>> settings = get_settings(env_file=".env.dev")
     """
     global _settings
-    if _settings is None:
-        _settings = Settings()
+    
+    # Check if we need to reload (env_file specified or ENV_FILE env var changed)
+    import os
+    current_env_file = env_file or os.getenv("ENV_FILE", ".env")
+    
+    # If settings already exist and no env_file change, return existing
+    if _settings is not None:
+        # Check if we need to reload
+        if env_file is not None:
+            # Force reload if env_file is explicitly provided and different
+            existing_env_file = getattr(_settings.model_config, "env_file", None)
+            if existing_env_file != env_file:
+                _settings = Settings.create(env_file=env_file)
+        elif os.getenv("ENV_FILE"):
+            # Check if ENV_FILE env var changed
+            existing_env_file = getattr(_settings.model_config, "env_file", None)
+            if existing_env_file != current_env_file:
+                _settings = Settings.create(env_file=current_env_file)
+        # If no change, return existing settings
+        return _settings
+    
+    # Create new settings instance
+    _settings = Settings.create(env_file=env_file or current_env_file)
     return _settings
 
 
-def reload_settings() -> Settings:
+def reload_settings(env_file: Optional[str] = None) -> Settings:
     """Reload settings from environment variables.
 
-    This is useful for testing or when environment variables change.
+    Args:
+        env_file: Optional path to environment file. If None, uses:
+            1. ENV_FILE environment variable
+            2. Default ".env"
 
     Returns:
         Settings: The newly loaded settings instance.
     """
     global _settings
-    _settings = Settings()
+    _settings = Settings.create(env_file=env_file)
     return _settings
 

@@ -5,17 +5,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-# Skip tests if aio_pika is not available
-try:
-    import aio_pika  # noqa: F401
-    HAS_AIO_PIKA = True
-except ImportError:
-    HAS_AIO_PIKA = False
-
 from src.poc.models import TextMessage
-
-if HAS_AIO_PIKA:
-    from src.poc.rabbitmq_consumer import RabbitMQConsumer
+from src.poc.rabbitmq_consumer import RabbitMQConsumer
 
 if TYPE_CHECKING:
     from _pytest.capture import CaptureFixture
@@ -23,9 +14,6 @@ if TYPE_CHECKING:
     from _pytest.logging import LogCaptureFixture
     from _pytest.monkeypatch import MonkeyPatch
     from pytest_mock.plugin import MockerFixture
-
-
-pytestmark = pytest.mark.skipif(not HAS_AIO_PIKA, reason="aio_pika not installed")
 
 
 class TestRabbitMQConsumer:
@@ -223,6 +211,6 @@ class TestRabbitMQConsumer:
 
         await consumer.close()
 
-        assert consumer._is_running is False
+        assert consumer._running is False
         mock_queue.cancel.assert_called_once_with("test-tag")
 

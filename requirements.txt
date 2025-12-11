@@ -49,3 +49,23 @@ edge-tts~=6.1.0  # Recommended: Windows Edge TTS (free, high quality)
 Pillow~=10.0.0
 scipy~=1.11.0
 scikit-image~=0.21.0
+
+# MuseTalk dependencies
+diffusers~=0.30.2
+accelerate~=0.28.0
+transformers~=4.39.2
+huggingface_hub~=0.30.2
+einops~=0.8.1
+omegaconf~=2.3.0
+ffmpeg-python~=0.2.0
+moviepy~=1.0.3
+imageio[ffmpeg]~=2.31.0
+gdown~=4.7.0
+tqdm~=4.66.0  # Progress bars for MuseTalk preprocessing
+# MMLab packages for MuseTalk (install via mim)
+openmim
+# Note: Install MMLab packages separately:
+# mim install mmengine
+# mim install "mmcv==2.0.1"
+# mim install "mmdet==3.1.0"
+# mim install "mmpose==1.1.0"

@@ -1,0 +1,33 @@
+[
+  {
+    "type": "text",
+    "data": "Hello! This is the first test message.",
+    "session_id": "test-session-1",
+    "language": "en"
+  },
+  {
+    "type": "text",
+    "data": "This is the second message to test sequential processing.",
+    "session_id": "test-session-2",
+    "language": "en"
+  },
+  {
+    "type": "text",
+    "data": "The talking face should generate smoothly for each message.",
+    "session_id": "test-session-3",
+    "language": "en"
+  },
+  {
+    "type": "text",
+    "data": "This is a longer message to test how the system handles messages with more content. It should still process correctly and generate the talking face video.",
+    "session_id": "test-session-4",
+    "language": "en"
+  },
+  {
+    "type": "text",
+    "data": "Final test message. Thank you for testing!",
+    "session_id": "test-session-5",
+    "language": "en"
+  }
+]
+
